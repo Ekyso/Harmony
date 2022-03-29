@@ -20,6 +20,7 @@ namespace HarmonyLib
 		internal readonly List<Infix> innerprefixes;
 		internal readonly List<Infix> innerpostfixes;
 		internal readonly bool debug;
+		private readonly bool reversePatched;
 
 		internal MethodCreatorConfig(
 			MethodBase original,
@@ -30,7 +31,8 @@ namespace HarmonyLib
 			List<MethodInfo> finalizers,
 			List<Infix> innerprefixes,
 			List<Infix> innerpostfixes,
-			bool debug)
+			bool debug,
+			bool reversePatched)
 		{
 			this.original = original;
 			this.source = source;
@@ -41,19 +43,53 @@ namespace HarmonyLib
 			this.innerprefixes = innerprefixes;
 			this.innerpostfixes = innerpostfixes;
 			this.debug = debug;
+			this.reversePatched = reversePatched;
 		}
 
 		internal bool Prepare()
 		{
 			var patchInfo = HarmonySharedState.GetPatchInfo(original) ?? new PatchInfo();
 			patchIndex = patchInfo.VersionCount + 1;
-			patch = MethodPatcherTools.CreateDynamicMethod(original, $"_Patch{patchIndex}", debug);
+			patch = MethodPatcherTools.CreateDynamicMethod(original, GetDynamicMethodSuffix(patchInfo, this.reversePatched, patchIndex), debug);
 			if (patch == null) return false;
 			injections = Fixes.Union(InnerFixes.Select(fix => fix.OuterMethod)).ToDictionary(fix => fix, fix => fix.GetParameters().Select(p => new InjectedParameter(fix, p)).ToList());
 			returnType = AccessTools.GetReturnedType(original);
 			il = patch.GetILGenerator();
 			instructions = [];
 			return true;
+		}
+
+		private static string GetDynamicMethodSuffix(PatchInfo patchInfo, bool reversePatched, int idx)
+		{
+			string suffix = "";
+
+			// patched by
+			if (patchInfo != null)
+			{
+				string[] owners = (patchInfo.prefixes.Concat(patchInfo.postfixes).Concat(patchInfo.transpilers))
+					.Select(p => p.owner?.Trim())
+					.Where(p => !string.IsNullOrEmpty(p))
+					.Distinct()
+					.OrderBy(p => p)
+					.ToArray();
+
+				if (owners.Length > 0)
+				{
+					string possibleSuffix = "_PatchedBy<" + string.Join("__", owners) + ">";
+					suffix += possibleSuffix.Length <= 500
+						? possibleSuffix
+						: $"_PatchedBy<{owners.Length}_mods>";
+				}
+			}
+
+			// reverse patch
+			if (reversePatched)
+				suffix += "_ReversePatchedByUnknown";
+
+			// add default suffix if needed
+			return suffix.Length == 0
+				? $"_Patch{idx}"
+				: suffix;
 		}
 
 		internal void AddCode(CodeInstruction code) => instructions.Add(code);

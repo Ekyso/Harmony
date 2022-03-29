@@ -31,7 +31,8 @@ namespace HarmonyLib
 				sortedFinalizers,
 				sortedInnerPrefixes,
 				sortedInnerPostfixes,
-				debug
+				debug,
+				reversePatched: false
 			));
 			var (replacement, finalInstructions) = patcher.CreateReplacement();
 			if (replacement is null) throw new MissingMethodException($"Cannot create replacement for {original.FullDescription()}");
@@ -75,7 +76,8 @@ namespace HarmonyLib
 				emptyFix,
 				emptyInner,
 				emptyInner,
-				debug
+				debug,
+				reversePatched: true
 			));
 			var (replacement, finalInstructions) = patcher.CreateReplacement();
 			if (replacement is null) throw new MissingMethodException($"Cannot create replacement for {standin.method.FullDescription()}");
