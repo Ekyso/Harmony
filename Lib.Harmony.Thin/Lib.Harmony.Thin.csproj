@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <PackageId>Lib.Harmony.Thin</PackageId>
-    <TargetFrameworks>$(TargetFrameworks);netstandard2.0</TargetFrameworks>
+    <TargetFrameworks>net8.0</TargetFrameworks>
   </PropertyGroup>
 
   <PropertyGroup Condition="$(Configuration.StartsWith('Release'))">
@@ -17,8 +17,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Condition="'$(MonoModCoreVersion)' == ''" Include="../LocalMonoMod/src/MonoMod.Core/MonoMod.Core.csproj" />
-    <PackageReference Condition="'$(MonoModCoreVersion)' != ''" Include="MonoMod.Core" Version="$(MonoModCoreVersion)" />
+    <ProjectReference
+      Condition="'$(MonoModCoreVersion)' == ''"
+      Include="../LocalMonoMod/src/MonoMod.Core/MonoMod.Core.csproj"
+    />
+    <PackageReference
+      Condition="'$(MonoModCoreVersion)' != ''"
+      Include="MonoMod.Core"
+      Version="$(MonoModCoreVersion)"
+    />
   </ItemGroup>
 
   <!-- Replace Code with reference to Lib.Harmony.Ref for netstandard2.0 -->
@@ -29,7 +36,10 @@
 
   <Target Name="CleanZip" AfterTargets="Clean" Condition="'$(Configuration)'=='Release'">
     <ItemGroup>
-      <OldZipFiles Include="$(MSBuildThisFileDirectory)..\packages\Harmony-Thin.*.zip" Condition="'$(Configuration)'=='Release'" />
+      <OldZipFiles
+        Include="$(MSBuildThisFileDirectory)..\packages\Harmony-Thin.*.zip"
+        Condition="'$(Configuration)'=='Release'"
+      />
     </ItemGroup>
     <Delete Files="@(OldZipFiles)" />
   </Target>
@@ -44,7 +54,16 @@
     <RemoveDir Directories="$(MSBuildThisFileDirectory)bin\Release\netstandard2.0" />
   </Target>
 
-  <Target Name="Zip" AfterTargets="RemoveExtraDlls" DependsOnTargets="CleanZip" Condition="'$(Configuration)'=='Release'">
-    <ZipDirectory SourceDirectory="$(MSBuildThisFileDirectory)bin\$(Configuration)" DestinationFile="$(MSBuildThisFileDirectory)..\packages\Harmony-Thin.$(PackageVersion).zip" Overwrite="true"/>
+  <Target
+    Name="Zip"
+    AfterTargets="RemoveExtraDlls"
+    DependsOnTargets="CleanZip"
+    Condition="'$(Configuration)'=='Release'"
+  >
+    <ZipDirectory
+      SourceDirectory="$(MSBuildThisFileDirectory)bin\$(Configuration)"
+      DestinationFile="$(MSBuildThisFileDirectory)..\packages\Harmony-Thin.$(PackageVersion).zip"
+      Overwrite="true"
+    />
   </Target>
 </Project>

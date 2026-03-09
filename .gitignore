@@ -203,3 +203,23 @@ ModelManifest.xml
 /Harmony/Documentation/api/*.yml
 /Harmony/Documentation/Documentation.dll
 .DS_Store
+
+# Upstream Harmony files not needed for our fork
+.github/
+.vscode/
+docs/
+Documentation/
+drafts/
+scripts/
+AGENTS.md
+CNAME
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+_config.yml
+HarmonyLogo.png
+HarmonyTests/
+TestLibrary/
+testEnvironments.json
+.editorconfig
+.gitattributes
+.gitmodules
