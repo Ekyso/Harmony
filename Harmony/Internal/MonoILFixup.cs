@@ -27,6 +27,12 @@ namespace HarmonyLib
     /// correct type from surrounding IL, declares new typed locals, and redirects
     /// references. Falls back to searching existing LocalBuilders when inference fails,
     /// and handles shifted local indices from game recompilation.
+    ///
+    /// Fix 4: Bitwise op with object reference operand
+    /// Transpilers commonly use `isinst Type` followed by `or`/`and` to combine a
+    /// type-check with a boolean. CoreCLR's JIT treats the reference as a pointer-width
+    /// integer; Mono's verifier rejects it as invalid IL. Inserts `ldnull` + `cgt.un`
+    /// after `isinst` to convert the reference to int32 (0 or 1) before the bitwise op.
     /// </summary>
     internal static class MonoILFixup
 #pragma warning restore CS1570 // XML comment has badly formed XML
@@ -73,6 +79,9 @@ namespace HarmonyLib
             // Fix 3: Raw local variable index type mismatch
             if (il != null)
                 FixRawLocalIndices(instructions, il);
+
+            // Fix 4: isinst feeding into bitwise or/and/xor
+            FixIsinstBitwiseOp(instructions);
 
             return instructions;
         }
@@ -170,6 +179,53 @@ namespace HarmonyLib
                                     $"{Tag} FIXED: Nopped newobj Nullable<{valueType.Name}> at {i} (consumer {methodName} expects {valueType.Name})"
                                 );
                             }
+                        }
+                        break;
+                    }
+
+                    above -= popCount;
+                    above += pushCount;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Finds `isinst` instructions whose result feeds into a bitwise op (or/and/xor)
+        /// and inserts `ldnull` + `cgt.un` to convert the object reference to int32.
+        /// Uses stack-depth tracking to match each isinst to its consumer.
+        /// </summary>
+        private static void FixIsinstBitwiseOp(List<CodeInstruction> instructions)
+        {
+            for (int i = 0; i < instructions.Count; i++)
+            {
+                if (instructions[i].opcode != OpCodes.Isinst)
+                    continue;
+
+                // Track stack depth above our isinst result to find its consumer
+                int above = 0;
+                for (int j = i + 1; j < instructions.Count; j++)
+                {
+                    var op = instructions[j].opcode;
+
+                    if (op.FlowControl == FlowControl.Throw || op.FlowControl == FlowControl.Return)
+                        break;
+
+                    int popCount = GetStackPop(instructions[j]);
+                    int pushCount = GetStackPush(instructions[j]);
+                    if (popCount < 0 || pushCount < 0)
+                        break;
+
+                    if (popCount > above)
+                    {
+                        if (op == OpCodes.Or || op == OpCodes.And || op == OpCodes.Xor)
+                        {
+                            // Insert ldnull + cgt.un right after isinst to convert ref to 0/1
+                            instructions.Insert(i + 1, new CodeInstruction(OpCodes.Ldnull));
+                            instructions.Insert(i + 2, new CodeInstruction(OpCodes.Cgt_Un));
+                            Console.WriteLine(
+                                $"{Tag} FIXED: Inserted ref->int conversion after isinst at {i} (consumed by {op} at {j + 2})"
+                            );
+                            i += 2; // skip past inserted instructions
                         }
                         break;
                     }
