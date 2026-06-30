@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- The repo-root Directory.Build.props sets <TargetFrameworks>net10.0</TargetFrameworks>
+         unconditionally; with a singular <TargetFramework> also set, the SDK treats this as a
+         cross-targeting outer build and "dotnet test" reports "No test is available". Clear the
+         plural so this is an unambiguous single-target test project. -->
+    <TargetFrameworks></TargetFrameworks>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Must match InternalsVisibleTo in Directory.Build.props so internal APIs are accessible -->
+    <AssemblyName>HarmonyTests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Lokad.ILPack" Version="0.1.7" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lib.Harmony.Thin\Lib.Harmony.Thin.csproj" />
+    <ProjectReference Include="..\TestLibrary\TestLibrary.csproj" />
+    <!-- Alias MonoMod.Core as "mmc" to match the upstream ChangeAliasesOfStrongNameAssemblies target -->
+    <ProjectReference
+      Include="..\LocalMonoMod\src\MonoMod.Core\MonoMod.Core.csproj"
+      Aliases="mmc"
+    />
+  </ItemGroup>
+
+  <!-- Excluded files: see PORT-NOTES.md for details -->
+</Project>
