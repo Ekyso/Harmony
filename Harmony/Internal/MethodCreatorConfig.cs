@@ -1,146 +1,178 @@
-using MonoMod.Utils;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using MonoMod.Utils;
 
 namespace HarmonyLib
 {
+    internal class MethodCreatorConfig
+    {
+        internal readonly MethodBase original;
+        internal readonly MethodBase source; // for reverse patch
+        internal readonly List<MethodInfo> prefixes;
+        internal readonly List<MethodInfo> postfixes;
+        internal readonly List<MethodInfo> transpilers;
+        internal readonly List<MethodInfo> finalizers;
+        internal readonly List<Infix> innerprefixes;
+        internal readonly List<Infix> innerpostfixes;
+        internal readonly bool debug;
+        private readonly bool reversePatched;
+        private readonly PatchInfo patchInfo;
 
-	internal class MethodCreatorConfig
+        internal MethodCreatorConfig(
+            MethodBase original,
+            MethodBase source,
+            List<MethodInfo> prefixes,
+            List<MethodInfo> postfixes,
+            List<MethodInfo> transpilers,
+            List<MethodInfo> finalizers,
+            List<Infix> innerprefixes,
+            List<Infix> innerpostfixes,
+            bool debug,
+            bool reversePatched,
+            PatchInfo patchInfo = null
+        )
+        {
+            this.original = original;
+            this.source = source;
+            this.prefixes = prefixes;
+            this.postfixes = postfixes;
+            this.transpilers = transpilers;
+            this.finalizers = finalizers;
+            this.innerprefixes = innerprefixes;
+            this.innerpostfixes = innerpostfixes;
+            this.debug = debug;
+            this.reversePatched = reversePatched;
+            this.patchInfo = patchInfo;
+        }
 
-	{
-		internal readonly MethodBase original;
-		internal readonly MethodBase source; // for reverse patch
-		internal readonly List<MethodInfo> prefixes;
-		internal readonly List<MethodInfo> postfixes;
-		internal readonly List<MethodInfo> transpilers;
-		internal readonly List<MethodInfo> finalizers;
-		internal readonly List<Infix> innerprefixes;
-		internal readonly List<Infix> innerpostfixes;
-		internal readonly bool debug;
-		private readonly bool reversePatched;
+        internal bool Prepare()
+        {
+            patchIndex = (this.patchInfo?.VersionCount ?? 0) + 1;
+            patch = MethodPatcherTools.CreateDynamicMethod(
+                original,
+                GetDynamicMethodSuffix(this.patchInfo, this.reversePatched, patchIndex),
+                debug
+            );
+            if (patch == null)
+                return false;
+            injections = Fixes
+                .Union(InnerFixes.Select(fix => fix.OuterMethod))
+                .ToDictionary(
+                    fix => fix,
+                    fix => fix.GetParameters().Select(p => new InjectedParameter(fix, p)).ToList()
+                );
+            returnType = AccessTools.GetReturnedType(original);
+            il = patch.GetILGenerator();
+            instructions = [];
+            return true;
+        }
 
-		internal MethodCreatorConfig(
-			MethodBase original,
-			MethodBase source,
-			List<MethodInfo> prefixes,
-			List<MethodInfo> postfixes,
-			List<MethodInfo> transpilers,
-			List<MethodInfo> finalizers,
-			List<Infix> innerprefixes,
-			List<Infix> innerpostfixes,
-			bool debug,
-			bool reversePatched)
-		{
-			this.original = original;
-			this.source = source;
-			this.prefixes = prefixes;
-			this.postfixes = postfixes;
-			this.transpilers = transpilers;
-			this.finalizers = finalizers;
-			this.innerprefixes = innerprefixes;
-			this.innerpostfixes = innerpostfixes;
-			this.debug = debug;
-			this.reversePatched = reversePatched;
-		}
+        private static string GetDynamicMethodSuffix(
+            PatchInfo patchInfo,
+            bool reversePatched,
+            int idx
+        )
+        {
+            string suffix = "";
 
-		internal bool Prepare()
-		{
-			var patchInfo = HarmonySharedState.GetPatchInfo(original) ?? new PatchInfo();
-			patchIndex = patchInfo.VersionCount + 1;
-			patch = MethodPatcherTools.CreateDynamicMethod(original, GetDynamicMethodSuffix(patchInfo, this.reversePatched, patchIndex), debug);
-			if (patch == null) return false;
-			injections = Fixes.Union(InnerFixes.Select(fix => fix.OuterMethod)).ToDictionary(fix => fix, fix => fix.GetParameters().Select(p => new InjectedParameter(fix, p)).ToList());
-			returnType = AccessTools.GetReturnedType(original);
-			il = patch.GetILGenerator();
-			instructions = [];
-			return true;
-		}
+            // patched by
+            if (patchInfo != null)
+            {
+                string[] owners = (
+                    patchInfo.prefixes.Concat(patchInfo.postfixes).Concat(patchInfo.transpilers)
+                )
+                    .Select(p => p.owner?.Trim())
+                    .Where(p => !string.IsNullOrEmpty(p))
+                    .Distinct()
+                    .OrderBy(p => p)
+                    .ToArray();
 
-		private static string GetDynamicMethodSuffix(PatchInfo patchInfo, bool reversePatched, int idx)
-		{
-			string suffix = "";
+                if (owners.Length > 0)
+                {
+                    string possibleSuffix = "_PatchedBy<" + string.Join("__", owners) + ">";
+                    suffix +=
+                        possibleSuffix.Length <= 500
+                            ? possibleSuffix
+                            : $"_PatchedBy<{owners.Length}_mods>";
+                }
+            }
 
-			// patched by
-			if (patchInfo != null)
-			{
-				string[] owners = (patchInfo.prefixes.Concat(patchInfo.postfixes).Concat(patchInfo.transpilers))
-					.Select(p => p.owner?.Trim())
-					.Where(p => !string.IsNullOrEmpty(p))
-					.Distinct()
-					.OrderBy(p => p)
-					.ToArray();
+            // reverse patch
+            if (reversePatched)
+                suffix += "_ReversePatchedByUnknown";
 
-				if (owners.Length > 0)
-				{
-					string possibleSuffix = "_PatchedBy<" + string.Join("__", owners) + ">";
-					suffix += possibleSuffix.Length <= 500
-						? possibleSuffix
-						: $"_PatchedBy<{owners.Length}_mods>";
-				}
-			}
+            // add default suffix if needed
+            return suffix.Length == 0 ? $"_Patch{idx}" : suffix;
+        }
 
-			// reverse patch
-			if (reversePatched)
-				suffix += "_ReversePatchedByUnknown";
+        internal void AddCode(CodeInstruction code) => instructions.Add(code);
 
-			// add default suffix if needed
-			return suffix.Length == 0
-				? $"_Patch{idx}"
-				: suffix;
-		}
+        internal void AddCodes(IEnumerable<CodeInstruction> codes) => instructions.AddRange(codes);
 
-		internal void AddCode(CodeInstruction code) => instructions.Add(code);
-		internal void AddCodes(IEnumerable<CodeInstruction> codes) => instructions.AddRange(codes);
-		internal void AddLocal(InjectionType type, LocalBuilder local) => localVariables.Add(type, local);
-		internal void AddLocal(string name, LocalBuilder local) => localVariables.Add(name, local);
-		internal LocalBuilder GetLocal(InjectionType type) => localVariables[type];
-		internal LocalBuilder GetLocal(string name) => localVariables[name];
-		internal bool HasLocal(string name) => localVariables.TryGetValue(name, out _);
+        internal void AddLocal(InjectionType type, LocalBuilder local) =>
+            localVariables.Add(type, local);
 
-		internal LocalBuilder DeclareLocal(Type type, bool isPinned = false) => il.DeclareLocal(type, isPinned);
-		internal Label DefineLabel() => il.DefineLabel();
+        internal void AddLocal(string name, LocalBuilder local) => localVariables.Add(name, local);
 
-		// prepared by Prepare()
-		internal int patchIndex;
-		internal DynamicMethodDefinition patch;
-		internal Dictionary<MethodInfo, List<InjectedParameter>> injections;
-		internal Type returnType;
-		internal ILGenerator il;
-		internal List<CodeInstruction> instructions;
+        internal LocalBuilder GetLocal(InjectionType type) => localVariables[type];
 
-		// added by MethodCreator
-		internal LocalBuilder[] originalVariables;
-		internal VariableState localVariables;
-		internal LocalBuilder resultVariable;
-		internal Label? skipOriginalLabel;
-		internal LocalBuilder runOriginalVariable;
-		internal LocalBuilder exceptionVariable;
-		internal LocalBuilder finalizedVariable;
+        internal LocalBuilder GetLocal(string name) => localVariables[name];
 
-		internal MethodBase MethodBase => source ?? original;
-		internal bool OriginalIsStatic => original.IsStatic;
-		internal IEnumerable<MethodInfo> Fixes => prefixes.Union(postfixes).Union(finalizers);
-		internal IEnumerable<Infix> InnerFixes => innerprefixes.Union(innerpostfixes);
-		internal IEnumerable<InjectedParameter> InjectionsFor(MethodInfo fix, InjectionType type = InjectionType.Unknown)
-		{
-			if (injections.TryGetValue(fix, out var list))
-			{
-				if (type != InjectionType.Unknown)
-					return list.Where(pair => pair.injectionType == type);
-				return list;
-			}
-			return [];
-		}
-		internal bool AnyFixHas(InjectionType type) => injections.Values.SelectMany(list => list).Any(pair => pair.injectionType == type);
-		internal void WithFixes(Action<MethodInfo> action)
-		{
-			foreach (var fix in Fixes)
-				action(fix);
-			foreach (var fix in InnerFixes)
-				action(fix.OuterMethod);
-		}
-	}
+        internal bool HasLocal(string name) => localVariables.TryGetValue(name, out _);
+
+        internal LocalBuilder DeclareLocal(Type type, bool isPinned = false) =>
+            il.DeclareLocal(type, isPinned);
+
+        internal Label DefineLabel() => il.DefineLabel();
+
+        // prepared by Prepare()
+        internal int patchIndex;
+        internal DynamicMethodDefinition patch;
+        internal Dictionary<MethodInfo, List<InjectedParameter>> injections;
+        internal Type returnType;
+        internal ILGenerator il;
+        internal List<CodeInstruction> instructions;
+
+        // added by MethodCreator
+        internal LocalBuilder[] originalVariables;
+        internal VariableState localVariables;
+        internal LocalBuilder resultVariable;
+        internal Label? skipOriginalLabel;
+        internal LocalBuilder runOriginalVariable;
+        internal LocalBuilder exceptionVariable;
+        internal LocalBuilder finalizedVariable;
+
+        internal MethodBase MethodBase => source ?? original;
+        internal bool OriginalIsStatic => original.IsStatic;
+        internal IEnumerable<MethodInfo> Fixes => prefixes.Union(postfixes).Union(finalizers);
+        internal IEnumerable<Infix> InnerFixes => innerprefixes.Union(innerpostfixes);
+
+        internal IEnumerable<InjectedParameter> InjectionsFor(
+            MethodInfo fix,
+            InjectionType type = InjectionType.Unknown
+        )
+        {
+            if (injections.TryGetValue(fix, out var list))
+            {
+                if (type != InjectionType.Unknown)
+                    return list.Where(pair => pair.injectionType == type);
+                return list;
+            }
+            return [];
+        }
+
+        internal bool AnyFixHas(InjectionType type) =>
+            injections.Values.SelectMany(list => list).Any(pair => pair.injectionType == type);
+
+        internal void WithFixes(Action<MethodInfo> action)
+        {
+            foreach (var fix in Fixes)
+                action(fix);
+            foreach (var fix in InnerFixes)
+                action(fix.OuterMethod);
+        }
+    }
 }
